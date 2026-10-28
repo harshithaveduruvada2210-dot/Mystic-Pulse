@@ -1,0 +1,122 @@
+import sys
+import psutil
+
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout,
+    QLabel, QDoubleSpinBox, QPushButton
+)
+
+
+class WarningDashboard(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("MysticPulse - Warning Indicators")
+        self.resize(450, 350)
+
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #101820;
+                color: white;
+                font-size: 14px;
+            }
+
+            QLabel {
+                padding: 8px;
+            }
+
+            QPushButton {
+                padding: 8px;
+                background-color: #263746;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+
+        self.cpu_label = QLabel("CPU Usage: --%")
+        self.ram_label = QLabel("RAM Usage: --%")
+        self.warning_label = QLabel("System status: Normal")
+
+        layout.addWidget(self.cpu_label)
+        layout.addWidget(self.ram_label)
+
+        layout.addWidget(QLabel("CPU warning threshold (%)"))
+
+        self.cpu_threshold = QDoubleSpinBox()
+        self.cpu_threshold.setRange(1, 100)
+        self.cpu_threshold.setValue(80)
+        layout.addWidget(self.cpu_threshold)
+
+        layout.addWidget(QLabel("RAM warning threshold (%)"))
+
+        self.ram_threshold = QDoubleSpinBox()
+        self.ram_threshold.setRange(1, 100)
+        self.ram_threshold.setValue(80)
+        layout.addWidget(self.ram_threshold)
+
+        self.warning_label.setWordWrap(True)
+        layout.addWidget(self.warning_label)
+
+        self.start_button = QPushButton("Start Monitoring")
+        layout.addWidget(self.start_button)
+
+        self.start_button.clicked.connect(self.start_monitoring)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.check_usage)
+
+        self.flash_state = False
+
+    def start_monitoring(self):
+        if not self.timer.isActive():
+            self.timer.start(1000)
+
+    def check_usage(self):
+        cpu = psutil.cpu_percent()
+        ram = psutil.virtual_memory().percent
+
+        self.cpu_label.setText(f"CPU Usage: {cpu:.1f}%")
+        self.ram_label.setText(f"RAM Usage: {ram:.1f}%")
+
+        warnings = []
+
+        if cpu >= self.cpu_threshold.value():
+            warnings.append("HIGH CPU USAGE")
+
+        if ram >= self.ram_threshold.value():
+            warnings.append("HIGH RAM USAGE")
+
+        if warnings:
+            self.flash_state = not self.flash_state
+
+            if self.flash_state:
+                self.warning_label.setText("WARNING: " + " | ".join(warnings))
+                self.warning_label.setStyleSheet(
+                    "background-color: #ff1744; color: white;"
+                    "font-weight: bold;"
+                )
+            else:
+                self.warning_label.setText("WARNING: " + " | ".join(warnings))
+                self.warning_label.setStyleSheet(
+                    "background-color: #101820; color: #ff5252;"
+                    "font-weight: bold;"
+                )
+        else:
+            self.warning_label.setText("System status: Normal")
+            self.warning_label.setStyleSheet(
+                "background-color: #1b5e20; color: white;"
+            )
+
+    def closeEvent(self, event):
+        self.timer.stop()
+        event.accept()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+
+    window = WarningDashboard()
+    window.show()
+
+    sys.exit(app.exec())
