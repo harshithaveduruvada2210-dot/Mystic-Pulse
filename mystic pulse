@@ -1,1 +1,141 @@
+import sys
+import time
+import psutil
 
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout,
+    QLabel, QSpinBox, QPushButton
+)
+
+
+class SystemWorker(QThread):
+    # Send collected metrics safely to the GUI thread.
+    metrics_updated = pyqtSignal(dict)
+
+    def __init__(self, interval=1000):
+        super().__init__()
+
+        self.interval = interval
+        self.running = True
+
+    def run(self):
+        # Initialize CPU measurement.
+        psutil.cpu_percent(interval=None)
+
+        while self.running:
+            start = time.monotonic()
+
+            metrics = {
+                "cpu": psutil.cpu_percent(interval=None),
+                "ram": psutil.virtual_memory().percent,
+                "disk": psutil.disk_usage("/").percent,
+                "battery": self.get_battery()
+            }
+
+            self.metrics_updated.emit(metrics)
+
+            elapsed = (time.monotonic() - start) * 1000
+            delay = max(0, self.interval - elapsed)
+
+            # Sleep in small increments so shutdown is responsive.
+            deadline = time.monotonic() + delay / 1000
+
+            while self.running and time.monotonic() < deadline:
+                self.msleep(50)
+
+    def get_battery(self):
+        battery = psutil.sensors_battery()
+
+        if battery is None:
+            return "Not available"
+
+        return round(battery.percent, 1)
+
+    def stop(self):
+        self.running = False
+        self.wait()
+
+
+class LiveDashboard(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("MysticPulse - Live Monitoring")
+        self.resize(400, 300)
+
+        layout = QVBoxLayout(self)
+
+        self.cpu_label = QLabel("CPU: --%")
+        self.ram_label = QLabel("RAM: --%")
+        self.disk_label = QLabel("Disk: --%")
+        self.battery_label = QLabel("Battery: --")
+
+        for label in (
+            self.cpu_label,
+            self.ram_label,
+            self.disk_label,
+            self.battery_label
+        ):
+            layout.addWidget(label)
+
+        layout.addWidget(QLabel("Sampling interval (ms):"))
+
+        self.interval_input = QSpinBox()
+        self.interval_input.setRange(100, 2000)
+        self.interval_input.setValue(1000)
+        layout.addWidget(self.interval_input)
+
+        self.start_button = QPushButton("Start Monitoring")
+        self.stop_button = QPushButton("Stop Monitoring")
+
+        layout.addWidget(self.start_button)
+        layout.addWidget(self.stop_button)
+
+        self.worker = None
+
+        self.start_button.clicked.connect(self.start_monitoring)
+        self.stop_button.clicked.connect(self.stop_monitoring)
+
+    def start_monitoring(self):
+        if self.worker is not None:
+            if self.worker.isRunning():
+                return
+
+        self.worker = SystemWorker(self.interval_input.value())
+        self.worker.metrics_updated.connect(self.update_display)
+        self.worker.start()
+
+    def update_display(self, metrics):
+        self.cpu_label.setText(f"CPU: {metrics['cpu']:.1f}%")
+        self.ram_label.setText(f"RAM: {metrics['ram']:.1f}%")
+        self.disk_label.setText(f"Disk: {metrics['disk']:.1f}%")
+
+        battery = metrics["battery"]
+
+        if isinstance(battery, (int, float)):
+            battery_text = f"{battery:.1f}%"
+        else:
+            battery_text = battery
+
+        self.battery_label.setText(f"Battery: {battery_text}")
+
+    def stop_monitoring(self):
+        if self.worker is not None:
+            if self.worker.isRunning():
+                self.worker.stop()
+
+            self.worker = None
+
+    def closeEvent(self, event):
+        self.stop_monitoring()
+        event.accept()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+
+    window = LiveDashboard()
+    window.show()
+
+    sys.exit(app.exec())
